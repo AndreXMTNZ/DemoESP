@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eworks | Monitor ESP32</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0a1324;color:#edf4ff;font-family:system-ui,Arial,sans-serif;padding:32px 16px}main{max-width:900px;margin:auto}header{display:flex;align-items:center;justify-content:space-between;gap:12px}h1{font-size:1.35rem}h1 span{color:#49c8ff}h2{font-size:1.1rem;margin:0 0 18px}.card{background:#17253b;border:1px solid #2d405b;border-radius:20px;padding:25px;margin-top:22px}.reading{font-size:clamp(3rem,10vw,5rem);font-weight:750;text-align:center;color:#59cdff;margin:20px 0}.muted{color:#a5b8d4;text-align:center}.status{font-size:.9rem;color:#fbbf24}.status.online{color:#4ade80}.status.offline{color:#fb7185}canvas{width:100%!important;max-height:350px}table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{padding:11px;text-align:left;border-bottom:1px solid #304056}th{color:#b7c8db}small{color:#9eaec4}select{border:1px solid #455b75;border-radius:8px;background:#101e32;color:#fff;padding:7px}.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<main>
+<header><h1><span>eworks</span> / ESP32 Monitor</h1><div id="estado" class="status">Esperando datos...</div></header>
+<section class="card"><div class="muted">Temperatura interna del chip</div><div id="temperatura" class="reading">-- °C</div><div class="muted" id="ultima">Sin mediciones</div></section>
+<section class="card"><header><h2>Historial de temperatura</h2><label>Mostrar <select id="cantidad"><option value="30">30</option><option value="60" selected>60</option><option value="120">120</option><option value="300">300</option></select> lecturas</label></header><canvas id="grafica"></canvas></section>
+<section class="card"><h2>Últimas mediciones</h2><div class="scroll"><table><thead><tr><th>Fecha y hora</th><th>Temperatura</th></tr></thead><tbody id="tabla"><tr><td colspan="2">Cargando...</td></tr></tbody></table></div></section>
+<p><small>Lecturas del sensor interno del ESP32: orientativas y diferentes de la temperatura ambiente. La vista de historial se limita a las últimas lecturas seleccionadas, pero la base conserva las mediciones anteriores.</small></p>
+</main>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
+import {getDatabase,ref,onValue,query,limitToLast} from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-database.js';
+const config={apiKey:'AIzaSyDylCLUt979ISJCcl-fMbt2iKjuavJM4CI',authDomain:'demoesp-5241c.firebaseapp.com',databaseURL:'https://demoesp-5241c-default-rtdb.firebaseio.com',projectId:'demoesp-5241c',storageBucket:'demoesp-5241c.firebasestorage.app',messagingSenderId:'613059339628',appId:'1:613059339628:web:849f77a702af2835d5bf49'};
+const app=initializeApp(config),db=getDatabase(app);
+const $=id=>document.getElementById(id);
+const fecha=ms=>new Date(ms).toLocaleString('es-SV',{dateStyle:'short',timeStyle:'medium'});
+const grafica=new Chart($('grafica'),{type:'line',data:{labels:[],datasets:[{label:'Temperatura °C',data:[],borderColor:'#59cdff',backgroundColor:'rgba(89,205,255,.12)',fill:true,tension:.25,pointRadius:2}]},options:{responsive:true,scales:{y:{title:{display:true,text:'°C'}}},plugins:{legend:{display:false}}}});
+let ultima=null,unsubscribeHistorial=()=>{};
+function actualizarEstado(){if(!ultima){$('estado').textContent='Sin mediciones';$('estado').className='status offline';return;}const transcurrido=Date.now()-ultima.timestamp;const enLinea=transcurrido>=0&&transcurrido<65000;$('estado').textContent=enLinea?'● Datos recientes':'● Sin datos recientes';$('estado').className='status '+(enLinea?'online':'offline');}
+onValue(ref(db,'esp32/actual'),snap=>{ultima=snap.val();if(ultima&&Number.isFinite(Number(ultima.temperatura))){$('temperatura').textContent=Number(ultima.temperatura).toFixed(1)+' °C';$('ultima').textContent='Última lectura: '+fecha(ultima.timestamp);}actualizarEstado();},error=>{$('estado').textContent='Error de lectura: '+error.message;$('estado').className='status offline';});
+setInterval(actualizarEstado,5000);
+function cargarHistorial(){unsubscribeHistorial();const cantidad=Number($('cantidad').value);unsubscribeHistorial=onValue(query(ref(db,'esp32/historial'),limitToLast(cantidad)),snap=>{const rows=Object.values(snap.val()||{}).filter(x=>x&&Number.isFinite(Number(x.temperatura))&&Number.isFinite(Number(x.timestamp))).sort((a,b)=>a.timestamp-b.timestamp);grafica.data.labels=rows.map(x=>new Date(x.timestamp).toLocaleTimeString('es-SV'));grafica.data.datasets[0].data=rows.map(x=>Number(x.temperatura));grafica.update();$('tabla').replaceChildren();for(const x of rows.slice().reverse().slice(0,20)){const tr=document.createElement('tr'),td1=document.createElement('td'),td2=document.createElement('td');td1.textContent=fecha(x.timestamp);td2.textContent=Number(x.temperatura).toFixed(1)+' °C';tr.append(td1,td2);$('tabla').append(tr);}if(!rows.length)$('tabla').innerHTML='<tr><td colspan="2">Aún no hay mediciones</td></tr>';},error=>{$('tabla').textContent='Error al leer historial: '+error.message;});}
+$('cantidad').addEventListener('change',cargarHistorial);cargarHistorial();
+</script>
+</body>
+</html>
